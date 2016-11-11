@@ -191,7 +191,8 @@ class Ping :
         sshcmd = ""
         sourcecmd = ""
         if self.relay and self.relay.has_key("via") \
-           and self.relay["via"] == "snmp" :
+           and (self.relay["via"] == "snmp" or self.relay["via"] == "snmpv2" \
+                or self.relay["via"] == "snmpv3") :
             ## SNMP
             return self.sendSnmpPing()
 
@@ -255,30 +256,50 @@ class Ping :
         return res
 
     def sendSnmpPing (self) :
-        if not self.relay.has_key("community") :
-            raise RuntimeError ("\"community\" is not specified for %s" %
-                                self.addr)
-        community = self.relay["community"]
-        community = community.replace("\\", "\\\\")
-        community = community.replace("'", "\\'")
-        snmpcmd = "snmpping -Cc1 -v 2c -c \'%s\' " % community
-        if not self.relay.has_key("relay") :
-            raise RuntimeError ("\"relay\" is not specified for %s" %
-                                self.addr)
-        snmpcmd += " %s " % self.relay["relay"]
+        def escapeArg(s):
+            return s.replace("\\", "\\\\").replace("'", "\\'")
 
+        if self.relay["via"] == "snmp" or self.relay["via"] == "snmpv2" :
+            if not self.relay.has_key("community") :
+                raise RuntimeError ("\"community\" is not specified for %s" %
+                                    self.addr)
+            community = escapeArg(self.relay["community"])
+            snmpcmd = "snmpping -Cc1 -v 2c -c \'%s\' " % community
+            if not self.relay.has_key("relay") :
+                raise RuntimeError ("\"relay\" is not specified for %s" %
+                                    self.addr)
+        elif self.relay["via"] == "snmpv3" :
+            if not self.relay.has_key("secLevel") :
+                raise RuntimeError ("\"secLevel\" is not specified for %s" %
+                                    self.addr)
+            seclevel = escapeArg(self.relay["secLevel"])
+            snmpcmd = "snmpping -Cc1 -v 3 -l \'%s\' " % seclevel
+            if self.relay.has_key("secName") :
+                snmpcmd += " -u '%s'" % escapeArg(self.relay["secName"])
+            if self.relay.has_key("authProtocol") :
+                snmpcmd += " -a '%s'" % escapeArg(self.relay["authProtocol"])
+            if self.relay.has_key("authPassword") :
+                snmpcmd += " -A '%s'" % escapeArg(self.relay["authPassword"])
+            if self.relay.has_key("privProtocol") :
+                snmpcmd += " -x '%s'" % escapeArg(self.relay["privProtocol"])
+            if self.relay.has_key("privPassword") :
+                snmpcmd += " -X '%s'" % escapeArg(self.relay["privPassword"])
+        else:
+            raise
+
+        snmpcmd += " %s " % self.relay["relay"]
         pingcmd = snmpcmd + " %s" % self.addr
 
         result = commands.getoutput (pingcmd)
 
-        rttm = re.search (r'rtt min/avg/max/stddev = \d+', result)
+        rttm = re.search (r'rtt min/avg/max/stddev = (\d+)', result)
 
         res = PingResult ()
 
         if rttm :
             res.success = True
             res.errcode = PING_SUCCESS
-            res.rtt = float (rttm.group (0).split ('=')[1])
+            res.rtt = float (rttm.group (1))
             res.ttl = -1
 
         if not rttm :
@@ -598,7 +619,9 @@ class Deadman :
             relay = {}
             for s in ss :
                 key, value = s.split ("=")
-                if key in ("os", "relay", "via", "community") :
+                if key in ("os", "relay", "via", "community", "secLevel", \
+                           "secName", "authProtocol", "authPassword", \
+                           "privProtocol", "privPassword") :
                     relay[key] = value
                 elif key == "source" :
                     source = value
