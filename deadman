@@ -301,8 +301,7 @@ class Ping :
             res.errcode = PING_SUCCESS
             res.rtt = float (rttm.group (1))
             res.ttl = -1
-
-        if not rttm :
+        else :
             res.sucess = False
             res.errcode = PING_FAILED
 
